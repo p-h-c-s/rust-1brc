@@ -16,3 +16,12 @@ Temperature value: non null double between -99.9 (inclusive) and 99.9 (inclusive
 
 
 <!-- cargo run -r src/main.rs measurements.txt | head -c 5000 -->
+
+To profile: 
+cargo install flamegraph
+<!-- With 
+[profile.release]
+debug = true
+in cargo.toml
+ -->
+sudo cargo flamegraph 

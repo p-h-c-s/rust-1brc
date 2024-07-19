@@ -49,10 +49,27 @@ impl StationData {
         self.times_seen += 1.0;
     }
 
+    // fn parse_custom_float(s: &str) -> f64 {
+    //     let mut chars = s.chars();
+    //     let integer_part: String = chars.by_ref().take_while(|&c| c != '.').collect();
+    //     let fractional_part: String = chars.collect();
+    
+    //     let integer_value: f64 = integer_part.parse().unwrap_or(0.0);
+    //     let fractional_value: f64 = fractional_part.parse().unwrap_or(0.0);
+    
+    //     integer_value + fractional_value / 10.0
+    // }
+
+    // slow!
     fn parse_data<'a>(raw: &str) -> (String, f64) {
         let (name, temp) = raw.split_once(";").unwrap();
         (name.to_owned(), temp.parse::<f64>().unwrap())
     }
+
+    fn parse_line_buff<'a>(line_buff: &'a String) -> impl Iterator<Item = &'a str> {
+        line_buff.as_str().split_terminator("\n")
+    }
+
 }
 
 // Defined in challenge spec
@@ -76,34 +93,40 @@ fn main() -> io::Result<()> {
     let f = File::open(file_name)?;
     let buf = &mut BufReader::new(f);
 
+    // works, but is memory intensive
     let mut station_map: BTreeMap<String, StationData> = BTreeMap::new();
 
-    // works, but is memory intensive
-    let (tx, rx) = mpsc::channel(); 
+    let lines_to_buff: usize = 1000;
+    let (tx, rx) = mpsc::channel();
     thread::scope(|s|{
         s.spawn(move || {
-            let mut line = String::with_capacity(MAX_LINE_SIZE);
+            let mut line_buff = String::with_capacity((MAX_LINE_SIZE+2)*lines_to_buff);
+            let mut read_lines: usize = 0;
             loop {
-                line.clear();
-                let x = buf.read_line(&mut line).unwrap();
-                if line.is_empty() {
+                let bytes_read = buf.read_line(&mut line_buff).unwrap();
+                read_lines += 1;
+                if read_lines % lines_to_buff == 0 || bytes_read == 0 {
+                    tx.send(line_buff.clone()).unwrap();
+                    line_buff.clear();
+                }
+                if bytes_read == 0 {
                     break;
                 }
-                // the receiver should only be deallocated when the tx is
-                tx.send(line.clone()).unwrap();
             }
         });
         s.spawn(move || {
             loop {
-                if let Ok(line) = rx.recv() {
-                    let fmt_line = &line[0..line.len()-1]; // remove newline
-                    let (name, temp) = StationData::parse_data(&fmt_line);
-                    match station_map.get_mut(&name) {
-                        Some(station) => station.update_from(temp),
-                        None => {
-                            station_map.insert(name, StationData::new(temp));
-                        }
-                    };
+                if let Ok(line_buff) = rx.recv() {
+                    for line in StationData::parse_line_buff(&line_buff) {
+                        // let fmt_line = &line[0..line.len()-1]; // remove newline
+                        let (name, temp) = StationData::parse_data(&line);
+                        match station_map.get_mut(&name) {
+                            Some(station) => station.update_from(temp),
+                            None => {
+                                station_map.insert(name, StationData::new(temp));
+                            }
+                        };
+                    }
                 } else {
                     {
                         // write to stdio
