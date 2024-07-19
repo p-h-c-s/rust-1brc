@@ -94,10 +94,11 @@ fn main() -> io::Result<()> {
     let buf = &mut BufReader::new(f);
 
     // works, but is memory intensive
+    // Memory limited implementation, but very fast IO
     let mut station_map: BTreeMap<String, StationData> = BTreeMap::new();
 
     let lines_to_buff: usize = 1000;
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = mpsc::sync_channel(1000000);
     thread::scope(|s|{
         s.spawn(move || {
             let mut line_buff = String::with_capacity((MAX_LINE_SIZE+2)*lines_to_buff);
@@ -137,7 +138,7 @@ fn main() -> io::Result<()> {
                             write!(
                                 stdout,
                                 "{}={}/{}/{}, ",
-                                k, v.min_temp, v.mean_temp, v.max_temp
+                                k, v.min_temp.round(), v.mean_temp.round(), v.max_temp.round()
                             ).unwrap();
                         }
                         stdout.write(b"}").unwrap();
