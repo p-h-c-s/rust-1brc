@@ -4,6 +4,8 @@ use std::fs::File;
 use std::io::{prelude::*, BufReader};
 use std::io;
 use std::rc::Rc;
+use std::sync::mpsc;
+use std::thread;
 
 // station_name limitations: 100 bytes max
 struct StationData {
@@ -76,24 +78,53 @@ fn main() -> io::Result<()> {
 
     let mut station_map: BTreeMap<String, StationData> = BTreeMap::new();
 
-    // avoid allocating a String for each line. The iterator has that limitation
-    let mut line = String::with_capacity(MAX_LINE_SIZE);
-    loop {
-        line.clear();
-        buf.read_line(&mut line)?;
-        if line.is_empty() {
-            break;
-        }
-        // remove newline
-        let fmt_line = &line[0..line.len()-1];
-        let (name, temp) = StationData::parse_data(&fmt_line);
-        match station_map.get_mut(&name) {
-            Some(station) => station.update_from(temp),
-            None => {
-                station_map.insert(name, StationData::new(temp));
+    // works, but is memory intensive
+    let (tx, rx) = mpsc::channel(); 
+    thread::scope(|s|{
+        s.spawn(move || {
+            let mut line = String::with_capacity(MAX_LINE_SIZE);
+            loop {
+                line.clear();
+                let x = buf.read_line(&mut line).unwrap();
+                if line.is_empty() {
+                    break;
+                }
+                // the receiver should only be deallocated when the tx is
+                tx.send(line.clone()).unwrap();
             }
-        };
-    }
+        });
+        s.spawn(move || {
+            loop {
+                if let Ok(line) = rx.recv() {
+                    let fmt_line = &line[0..line.len()-1]; // remove newline
+                    let (name, temp) = StationData::parse_data(&fmt_line);
+                    match station_map.get_mut(&name) {
+                        Some(station) => station.update_from(temp),
+                        None => {
+                            station_map.insert(name, StationData::new(temp));
+                        }
+                    };
+                } else {
+                    {
+                        // write to stdio
+                        let mut stdout = io::stdout().lock();
+                        stdout.write(b"{").unwrap();
+                        for (k, v) in station_map.into_iter() {
+                            // ("{}={}/{}/{}", k, v.min_temp, v.mean_temp, v.max_temp)
+                            write!(
+                                stdout,
+                                "{}={}/{}/{}, ",
+                                k, v.min_temp, v.mean_temp, v.max_temp
+                            ).unwrap();
+                        }
+                        stdout.write(b"}").unwrap();
+                        break;
+                    }
+                }
+            }
+        });
+    });
+
 
     // Slow: allocates a string for each line :/
     // for l in lines_reader {
@@ -110,20 +141,6 @@ fn main() -> io::Result<()> {
     // }
 
     println!("finished reading");
-
-    {
-        let mut stdout = io::stdout().lock();
-        stdout.write(b"{")?;
-        for (k, v) in station_map.into_iter() {
-            // ("{}={}/{}/{}", k, v.min_temp, v.mean_temp, v.max_temp)
-            write!(
-                stdout,
-                "{}={}/{}/{}, ",
-                k, v.min_temp, v.mean_temp, v.max_temp
-            )?;
-        }
-        stdout.write(b"}")?;
-    }
 
     Ok(())
 }
