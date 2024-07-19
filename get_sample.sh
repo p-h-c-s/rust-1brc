@@ -1,6 +1,6 @@
 # Get the total number of lines in the file
 # total_lines=$(wc -l < measurements.txt)
-total_lines=10000000
+total_lines=1000000000
 
 echo $total_lines
 # Calculate a tenth of the total lines
