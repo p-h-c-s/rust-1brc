@@ -1,0 +1,10 @@
+Entebbe;31.3
+Ifrane;5.4
+Palmerston North;19.8
+Omaha;0.9
+San Juan;30.3
+Niigata;17.1
+El Paso;31.1
+Sarajevo;28.2
+Halifax;-0.2
+Bangui;16.6
