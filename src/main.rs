@@ -4,6 +4,7 @@ use std::fs::File;
 use std::io::{prelude::*, BufReader};
 use std::io;
 use std::rc::Rc;
+use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread::{self, ScopedJoinHandle};
 
@@ -92,17 +93,47 @@ fn merge_btrees(mut dest: BTreeMap<String, StationData>, src: BTreeMap<String, S
         }
     });
     dest
-    // src.ite().fl(|(src_key, src_v)| {
-    //     match dest.get_mut(src_key) {
-    //         Some(dest_v) => {
-    //             dest_v.update_from_station(src_v);
-    //         },
-    //         None => {
-    //             dest.insert(*src_key, *src_v);
-    //         }
-    //     }
-    //     dest
-    // }).collect()
+}
+
+// struct ChannelPool<T> {
+//     pool: Vec<(mpsc::Sender<T>, mpsc::Receiver<T>)>,
+//     idx: usize
+// }
+
+// impl<T> ChannelPool<T> {
+
+//     fn new(max_concurrency: usize) -> Self {
+//         let mut val = Self {
+//             pool: Vec::with_capacity(max_concurrency),
+//             idx: 0,
+//         };
+//         for _ in 1..max_concurrency {
+//             let channel: (Sender<T>, Receiver<T>) = mpsc::channel();
+//             val.pool.push(channel);
+//         }
+//         val
+//     }
+
+//     fn get(&mut self) -> &(mpsc::Sender<T>, mpsc::Receiver<T>) {
+//         let item = self.pool.get(self.idx % self.pool.len()).unwrap_or_else(|| {
+//             self.idx = 0;
+//             self.pool.get(0).unwrap()
+//         });
+//         self.idx += 1;
+//         item
+//     }
+// }
+
+fn get_round_robin<'a, T>(v: &'a Vec<T>, mut state: usize) -> (&'a T, usize) {
+    let item = v.get(state % v.len()).unwrap();
+    state += 1;
+    (item, state)
+}
+
+fn get_owned_round_robin<'a, T>(v: &mut Vec<T>, mut state: usize) -> (T, usize) {
+    let item = v.remove(state % v.len());
+    state += 1;
+    (item, state)
 }
 
 // Defined in challenge spec
@@ -111,6 +142,7 @@ const MAX_STATION_NAME_SIZE: usize = 100;
 // 5 bytes for two digit float number with a single fractional digit and `;` character
 // idea to divide file: pad each line up to MAX_LINE_SIZE bytes
 const MAX_LINE_SIZE: usize = MAX_STATION_NAME_SIZE + 5;
+const NUM_CONSUMERS: usize = 3;
 
 fn main() -> io::Result<()> {
     // won't accept non-utf-8 args
@@ -130,16 +162,26 @@ fn main() -> io::Result<()> {
     // Memory limited implementation, but very fast IO
 
     let lines_to_buff: usize = 10;
-    let (tx, rx) = mpsc::channel();
-    let rx_arc = Arc::new(Mutex::new(rx));
+
+    let mut tx_channels = Vec::new();
+    let mut rx_channels = Vec::new();
+    for _ in 0..NUM_CONSUMERS {
+        let (tx, rx): (Sender<String>, Receiver<String>) = mpsc::channel();
+        tx_channels.push(tx);
+        rx_channels.push(rx);
+    }
+    
     thread::scope(|s|{
         s.spawn(move || {
+            let mut state: usize = 0;
             let mut line_buff = String::with_capacity((MAX_LINE_SIZE+2)*lines_to_buff);
             let mut read_lines: usize = 0;
             loop {
                 let bytes_read = buf.read_line(&mut line_buff).unwrap();
                 read_lines += 1;
                 if read_lines % lines_to_buff == 0 || bytes_read == 0 {
+                    let (tx, new_state) = get_round_robin(&tx_channels, state);
+                    state = new_state;
                     tx.send(line_buff.clone()).unwrap();
                     line_buff.clear();
                 }
@@ -149,14 +191,18 @@ fn main() -> io::Result<()> {
             }
         });
         let mut handlers = Vec::new();
-        for _ in 0..5 {
-            let rx_ref = Arc::clone(&rx_arc);
+        let mut state: usize = 0;
+        for _ in 0..NUM_CONSUMERS {
+            let (rx, new_state) = get_owned_round_robin(&mut rx_channels, state);
+            state = new_state;
             let h = s.spawn(move || {
                 let mut station_map: BTreeMap<String, StationData> = BTreeMap::new();
                 loop {
-                    let rx_ref_locked = rx_ref.lock().unwrap();
-                    if let Ok(line_buff) = rx_ref_locked.recv() {
-                        drop(rx_ref_locked);
+                    // unlocks after reading
+                    let line_buff_res = {
+                        rx.recv()
+                    };
+                    if let Ok(line_buff) = line_buff_res {
                         for line in StationData::parse_line_buff(&line_buff) {
                             // let fmt_line = &line[0..line.len()-1]; // remove newline
                             let (name, temp) = StationData::parse_data(&line);
