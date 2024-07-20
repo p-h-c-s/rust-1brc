@@ -130,19 +130,13 @@ fn get_round_robin<'a, T>(v: &'a Vec<T>, mut state: usize) -> (&'a T, usize) {
     (item, state)
 }
 
-fn get_owned_round_robin<'a, T>(v: &mut Vec<T>, mut state: usize) -> (T, usize) {
-    let item = v.remove(state % v.len());
-    state += 1;
-    (item, state)
-}
-
 // Defined in challenge spec
 const MAX_STATIONS: usize = 10000;
 const MAX_STATION_NAME_SIZE: usize = 100;
 // 5 bytes for two digit float number with a single fractional digit and `;` character
 // idea to divide file: pad each line up to MAX_LINE_SIZE bytes
 const MAX_LINE_SIZE: usize = MAX_STATION_NAME_SIZE + 5;
-const NUM_CONSUMERS: usize = 3;
+const NUM_CONSUMERS: usize = 4;
 
 fn main() -> io::Result<()> {
     // won't accept non-utf-8 args
@@ -161,7 +155,7 @@ fn main() -> io::Result<()> {
     // works, but is memory intensive
     // Memory limited implementation, but very fast IO
 
-    let lines_to_buff: usize = 10;
+    let lines_to_buff: usize = 1000;
 
     let mut tx_channels = Vec::new();
     let mut rx_channels = Vec::new();
@@ -191,10 +185,8 @@ fn main() -> io::Result<()> {
             }
         });
         let mut handlers = Vec::new();
-        let mut state: usize = 0;
         for _ in 0..NUM_CONSUMERS {
-            let (rx, new_state) = get_owned_round_robin(&mut rx_channels, state);
-            state = new_state;
+            let rx = rx_channels.pop().unwrap();
             let h = s.spawn(move || {
                 let mut station_map: BTreeMap<String, StationData> = BTreeMap::new();
                 loop {
