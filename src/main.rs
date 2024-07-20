@@ -4,8 +4,8 @@ use std::fs::File;
 use std::io::{prelude::*, BufReader};
 use std::io;
 use std::rc::Rc;
-use std::sync::mpsc;
-use std::thread;
+use std::sync::{mpsc, Arc, Mutex};
+use std::thread::{self, ScopedJoinHandle};
 
 // station_name limitations: 100 bytes max
 struct StationData {
@@ -49,6 +49,13 @@ impl StationData {
         self.times_seen += 1.0;
     }
 
+    fn update_from_station(&mut self, src: Self) {
+        self.max_temp = self.max_temp.max(src.max_temp);
+        self.min_temp = self.min_temp.min(src.min_temp);
+        self.mean_temp = self.running_avg(src.mean_temp);
+        self.times_seen += 1.0;
+    }
+
     // fn parse_custom_float(s: &str) -> f64 {
     //     let mut chars = s.chars();
     //     let integer_part: String = chars.by_ref().take_while(|&c| c != '.').collect();
@@ -70,6 +77,32 @@ impl StationData {
         line_buff.as_str().split_terminator("\n")
     }
 
+}
+
+// merges src into dest, consuming both
+fn merge_btrees(mut dest: BTreeMap<String, StationData>, src: BTreeMap<String, StationData>) -> BTreeMap<String, StationData>{
+    src.into_iter().for_each(|(src_key, src_val)| {
+        match dest.get_mut(&src_key) {
+            Some(dest_v) => {
+                dest_v.update_from_station(src_val);
+            },
+            None => {
+                dest.insert(src_key, src_val);
+            }
+        }
+    });
+    dest
+    // src.ite().fl(|(src_key, src_v)| {
+    //     match dest.get_mut(src_key) {
+    //         Some(dest_v) => {
+    //             dest_v.update_from_station(src_v);
+    //         },
+    //         None => {
+    //             dest.insert(*src_key, *src_v);
+    //         }
+    //     }
+    //     dest
+    // }).collect()
 }
 
 // Defined in challenge spec
@@ -95,10 +128,10 @@ fn main() -> io::Result<()> {
 
     // works, but is memory intensive
     // Memory limited implementation, but very fast IO
-    let mut station_map: BTreeMap<String, StationData> = BTreeMap::new();
 
-    let lines_to_buff: usize = 1000;
-    let (tx, rx) = mpsc::sync_channel(1000000);
+    let lines_to_buff: usize = 10;
+    let (tx, rx) = mpsc::channel();
+    let rx_arc = Arc::new(Mutex::new(rx));
     thread::scope(|s|{
         s.spawn(move || {
             let mut line_buff = String::with_capacity((MAX_LINE_SIZE+2)*lines_to_buff);
@@ -115,38 +148,37 @@ fn main() -> io::Result<()> {
                 }
             }
         });
-        s.spawn(move || {
-            loop {
-                if let Ok(line_buff) = rx.recv() {
-                    for line in StationData::parse_line_buff(&line_buff) {
-                        // let fmt_line = &line[0..line.len()-1]; // remove newline
-                        let (name, temp) = StationData::parse_data(&line);
-                        match station_map.get_mut(&name) {
-                            Some(station) => station.update_from(temp),
-                            None => {
-                                station_map.insert(name, StationData::new(temp));
-                            }
-                        };
-                    }
-                } else {
-                    {
-                        // write to stdio
-                        let mut stdout = io::stdout().lock();
-                        stdout.write(b"{").unwrap();
-                        for (k, v) in station_map.into_iter() {
-                            // ("{}={}/{}/{}", k, v.min_temp, v.mean_temp, v.max_temp)
-                            write!(
-                                stdout,
-                                "{}={}/{}/{}, ",
-                                k, v.min_temp.round(), v.mean_temp.round(), v.max_temp.round()
-                            ).unwrap();
+        let mut handlers = Vec::new();
+        for _ in 0..5 {
+            let rx_ref = Arc::clone(&rx_arc);
+            let h = s.spawn(move || {
+                let mut station_map: BTreeMap<String, StationData> = BTreeMap::new();
+                loop {
+                    let rx_ref_locked = rx_ref.lock().unwrap();
+                    if let Ok(line_buff) = rx_ref_locked.recv() {
+                        drop(rx_ref_locked);
+                        for line in StationData::parse_line_buff(&line_buff) {
+                            // let fmt_line = &line[0..line.len()-1]; // remove newline
+                            let (name, temp) = StationData::parse_data(&line);
+                            match station_map.get_mut(&name) {
+                                Some(station) => station.update_from(temp),
+                                None => {
+                                    station_map.insert(name, StationData::new(temp));
+                                }
+                            };
                         }
-                        stdout.write(b"}").unwrap();
-                        break;
+                    } else {
+                        return station_map;
                     }
                 }
-            }
-        });
+            });
+            handlers.push(h);
+        }
+        let station_map: BTreeMap<String, StationData> = BTreeMap::new();
+        handlers.into_iter().fold(station_map, |s1, s2| {
+            let inner_station = s2.join().unwrap();
+            merge_btrees(s1, inner_station)
+        })
     });
 
 
