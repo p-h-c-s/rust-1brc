@@ -165,7 +165,7 @@ fn main() -> io::Result<()> {
         rx_channels.push(rx);
     }
     
-    thread::scope(|s|{
+    let station_map = thread::scope(|s|{
         s.spawn(move || {
             let mut state: usize = 0;
             let mut line_buff = String::with_capacity((MAX_LINE_SIZE+2)*lines_to_buff);
@@ -218,6 +218,21 @@ fn main() -> io::Result<()> {
             merge_btrees(s1, inner_station)
         })
     });
+
+    {
+        // write to stdio
+        let mut stdout = io::stdout().lock();
+        stdout.write(b"{").unwrap();
+        for (k, v) in station_map.into_iter() {
+            // ("{}={}/{}/{}", k, v.min_temp, v.mean_temp, v.max_temp)
+            write!(
+                stdout,
+                "{}={}/{}/{}, ",
+                k, v.min_temp.round(), v.mean_temp.round(), v.max_temp.round()
+            ).unwrap();
+        }
+        stdout.write(b"}").unwrap();
+    }
 
 
     // Slow: allocates a string for each line :/
