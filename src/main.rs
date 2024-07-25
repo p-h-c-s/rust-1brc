@@ -4,6 +4,7 @@ use std::fs::File;
 use std::io::{prelude::*, BufReader};
 use std::io;
 use std::rc::Rc;
+use std::str::from_utf8;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread::{self, ScopedJoinHandle};
@@ -52,9 +53,9 @@ impl StationData {
         (name.to_owned(), temp.parse::<f64>().unwrap())
     }
 
-    fn parse_line_buff<'a>(line_buff: &'a String) -> impl Iterator<Item = &'a str> {
-        line_buff.as_str().split_terminator("\n")
-    }
+    // fn parse_line_buff<'a>(line_buff: &'a str) -> impl Iterator<Item = &'a str> {
+    //     line_buff.lin
+    // }
 
 }
 
@@ -85,66 +86,38 @@ const MAX_STATION_NAME_SIZE: usize = 100;
 // 5 bytes for two digit float number with a single fractional digit and `;` character
 // idea to divide file: pad each line up to MAX_LINE_SIZE bytes
 const MAX_LINE_SIZE: usize = MAX_STATION_NAME_SIZE + 5;
-const NUM_CONSUMERS: usize = 4;
+const NUM_CONSUMERS: usize = 2;
 
 fn main() -> io::Result<()> {
     // won't accept non-utf-8 args
     let args: Vec<String> = env::args().collect();
     let file_name = match args.get(2).clone() {
         Some(fname) => fname,
-        None => "sample.txt",
+        None => "head.txt",
     };
     // let station_map: [StationData; MAX_STATIONS] = [StationData; MAX_STATIONS];
 
     println!("Reading from {:}", file_name);
 
     let f = File::open(file_name)?;
-    let buf = &mut BufReader::new(f);
+    let f_size = f.metadata().unwrap().len();
+    let mmap = mmap::Mmap::from_file(f);
+
+    let consumer_offsets = f_size as usize / NUM_CONSUMERS;
 
     // works, but is memory intensive
     // Memory limited implementation, but very fast IO
 
-    let lines_to_buff: usize = 10000;
-
-    let mut tx_channels = Vec::new();
-    let mut rx_channels = Vec::new();
-    for _ in 0..NUM_CONSUMERS {
-        let (tx, rx): (Sender<String>, Receiver<String>) = mpsc::channel();
-        tx_channels.push(tx);
-        rx_channels.push(rx);
-    }
-    
     let station_map = thread::scope(|s|{
-        s.spawn(move || {
-            let mut state: usize = 0;
-            let mut line_buff = String::with_capacity((MAX_LINE_SIZE+2)*lines_to_buff);
-            let mut read_lines: usize = 0;
-            loop {
-                let bytes_read = buf.read_line(&mut line_buff).unwrap();
-                read_lines += 1;
-                if read_lines % lines_to_buff == 0 || bytes_read == 0 {
-                    let (tx, new_state) = get_round_robin(&tx_channels, state);
-                    state = new_state;
-                    tx.send(line_buff.clone()).unwrap();
-                    line_buff.clear();
-                }
-                if bytes_read == 0 {
-                    break;
-                }
-            }
-        });
         let mut handlers = Vec::new();
         for _ in 0..NUM_CONSUMERS {
-            let rx = rx_channels.pop().unwrap();
+            let string_slice = from_utf8(mmap).unwrap().lines();
             let h = s.spawn(move || {
                 let mut station_map: BTreeMap<String, StationData> = BTreeMap::new();
                 loop {
-                    // unlocks after reading
-                    let line_buff_res = {
-                        rx.recv()
-                    };
-                    if let Ok(line_buff) = line_buff_res {
-                        for line in StationData::parse_line_buff(&line_buff) {
+                    if let Ok(line_buff) = string_slice {
+                        for line in line_buff.lines() {
+                            println!("{:?}", line);
                             // let fmt_line = &line[0..line.len()-1]; // remove newline
                             let (name, temp) = StationData::parse_data(&line);
                             match station_map.get_mut(&name) {
@@ -154,6 +127,7 @@ fn main() -> io::Result<()> {
                                 }
                             };
                         }
+                        return station_map;
                     } else {
                         return station_map;
                     }

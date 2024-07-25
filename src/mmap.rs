@@ -5,7 +5,7 @@ use std::{fs::File, os::raw::c_void};
 use libc::{mmap, size_t};
 use libc::{munmap, PROT_READ, PROT_WRITE, MAP_SHARED, MAP_FAILED};
 
-struct Mmap<'a> {
+pub struct Mmap<'a> {
     mmap_slice: &'a mut [u8],
     mmap_addr: *mut NonNull<u8>,
     f_len: usize
