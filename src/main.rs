@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::env;
+use std::{default, env};
 use std::fs::File;
 use std::io::{prelude::*, BufReader};
 use std::io;
@@ -80,6 +80,16 @@ fn get_round_robin<'a, T>(v: &'a Vec<T>, mut state: usize) -> (&'a T, usize) {
     (item, state)
 }
 
+// find the nearest newline to the end of the given chunk.
+// chunk_num should  start at 0
+fn get_nearest_newline<'a>(slice: &'a str, chunk_num: usize, chunk_size: usize) -> Result<&'a str, ()> {
+    let end_idx = (chunk_num + 1) * chunk_size;
+    match slice[end_idx..].find('\n') {
+        Some(i) => Ok(&slice[(end_idx-chunk_size)..i+1]),
+        None => Err(())
+    }
+}
+
 // Defined in challenge spec
 const MAX_STATIONS: usize = 10000;
 const MAX_STATION_NAME_SIZE: usize = 100;
@@ -103,21 +113,22 @@ fn main() -> io::Result<()> {
     let f_size = f.metadata().unwrap().len();
     let mmap = mmap::Mmap::from_file(f);
 
-    let consumer_offsets = f_size as usize / NUM_CONSUMERS;
+    let chunk_size = f_size as usize / NUM_CONSUMERS;
 
     // works, but is memory intensive
     // Memory limited implementation, but very fast IO
 
     let station_map = thread::scope(|s|{
         let mut handlers = Vec::new();
-        for _ in 0..NUM_CONSUMERS {
-            let string_slice = from_utf8(mmap).unwrap().lines();
+        let file_string_slice = from_utf8(mmap).unwrap();
+        for chunk_num in 0..NUM_CONSUMERS {
+            let curren_chunk_slice = get_nearest_newline(file_string_slice, chunk_num, chunk_size);
+
             let h = s.spawn(move || {
                 let mut station_map: BTreeMap<String, StationData> = BTreeMap::new();
                 loop {
-                    if let Ok(line_buff) = string_slice {
-                        for line in line_buff.lines() {
-                            println!("{:?}", line);
+                    if let Ok(chunk_slice) = curren_chunk_slice {
+                        for line in chunk_slice.lines() {
                             // let fmt_line = &line[0..line.len()-1]; // remove newline
                             let (name, temp) = StationData::parse_data(&line);
                             match station_map.get_mut(&name) {
