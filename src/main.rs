@@ -26,18 +26,6 @@ impl StationData {
         }
     }
 
-    // // https://www.reddit.com/r/rust/comments/v8wxky/string_vs_str_as_function_parameters/
-    // fn from_string(raw: String) -> (String, Self) {
-    //     // unwrap is usually unsafe, but we know the pattern of the input is stable
-    //     let (name, temp) = raw.split_once(";").unwrap();
-    //     let temp_f = temp.parse::<f64>().unwrap();
-    //     (name.to_owned(), Self {
-    //         min_temp: temp_f,
-    //         max_temp: temp_f,
-    //         mean_temp: temp_f,
-    //     })
-    // }
-
     #[inline]
     fn running_avg(&self, temp: f64) -> f64 {
         (self.mean_temp * (self.times_seen - 1.0) + temp) / self.times_seen
@@ -56,18 +44,6 @@ impl StationData {
         self.mean_temp = self.running_avg(src.mean_temp);
         self.times_seen += 1.0;
     }
-
-    // fn parse_custom_float(s: &str) -> f64 {
-    //     let mut chars = s.chars();
-    //     let integer_part: String = chars.by_ref().take_while(|&c| c != '.').collect();
-    //     let fractional_part: String = chars.collect();
-    
-    //     let integer_value: f64 = integer_part.parse().unwrap_or(0.0);
-    //     let fractional_value: f64 = fractional_part.parse().unwrap_or(0.0);
-    
-    //     integer_value + fractional_value / 10.0
-    // }
-
     // slow!
     fn parse_data<'a>(raw: &str) -> (String, f64) {
         let (name, temp) = raw.split_once(";").unwrap();
@@ -94,35 +70,6 @@ fn merge_btrees(mut dest: BTreeMap<String, StationData>, src: BTreeMap<String, S
     });
     dest
 }
-
-// struct ChannelPool<T> {
-//     pool: Vec<(mpsc::Sender<T>, mpsc::Receiver<T>)>,
-//     idx: usize
-// }
-
-// impl<T> ChannelPool<T> {
-
-//     fn new(max_concurrency: usize) -> Self {
-//         let mut val = Self {
-//             pool: Vec::with_capacity(max_concurrency),
-//             idx: 0,
-//         };
-//         for _ in 1..max_concurrency {
-//             let channel: (Sender<T>, Receiver<T>) = mpsc::channel();
-//             val.pool.push(channel);
-//         }
-//         val
-//     }
-
-//     fn get(&mut self) -> &(mpsc::Sender<T>, mpsc::Receiver<T>) {
-//         let item = self.pool.get(self.idx % self.pool.len()).unwrap_or_else(|| {
-//             self.idx = 0;
-//             self.pool.get(0).unwrap()
-//         });
-//         self.idx += 1;
-//         item
-//     }
-// }
 
 fn get_round_robin<'a, T>(v: &'a Vec<T>, mut state: usize) -> (&'a T, usize) {
     let item = v.get(state % v.len()).unwrap();
@@ -155,7 +102,7 @@ fn main() -> io::Result<()> {
     // works, but is memory intensive
     // Memory limited implementation, but very fast IO
 
-    let lines_to_buff: usize = 1000;
+    let lines_to_buff: usize = 10000;
 
     let mut tx_channels = Vec::new();
     let mut rx_channels = Vec::new();
@@ -234,22 +181,6 @@ fn main() -> io::Result<()> {
         stdout.write(b"}").unwrap();
     }
 
-
-    // Slow: allocates a string for each line :/
-    // for l in lines_reader {
-    //     if let Ok(line) = l {
-    //         // let (name, data) = StationData::from_string(line);
-    //         let (name, temp) = StationData::parse_data(&line);
-    //         match station_map.get_mut(&name) {
-    //             Some(station) => station.update_from(temp),
-    //             None => {
-    //                 station_map.insert(name, StationData::new(temp));
-    //             }
-    //         };
-    //     }
-    // }
-
-    println!("finished reading");
 
     Ok(())
 }
