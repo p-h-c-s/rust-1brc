@@ -8,6 +8,8 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread::{self, ScopedJoinHandle};
 
+pub mod mmap;
+
 // station_name limitations: 100 bytes max
 struct StationData {
     min_temp: f64,
