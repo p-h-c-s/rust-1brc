@@ -74,7 +74,7 @@ impl StationData {
 }
 
 // merges src into dest, consuming both
-fn merge_btrees(mut dest: BTreeMap<String, StationData>, src: BTreeMap<String, StationData>) -> BTreeMap<String, StationData>{
+fn merge_btrees<'a>(mut dest: BTreeMap<&'a str, StationData>, src: BTreeMap<&'a str, StationData>) -> BTreeMap<&'a str, StationData>{
     src.into_iter().for_each(|(src_key, src_val)| {
         match dest.get_mut(&src_key) {
             Some(dest_v) => {
@@ -129,7 +129,7 @@ fn main() -> io::Result<()> {
     let chunk_size = f_size as usize / NUM_CONSUMERS;
 
     let station_map = thread::scope(|s|{
-        let mut handlers: Vec<ScopedJoinHandle<BTreeMap<String, StationData>>> = Vec::new();
+        let mut handlers: Vec<ScopedJoinHandle<BTreeMap<&str, StationData>>> = Vec::new();
         // let file_string_slice = unsafe {from_utf8_unchecked(mmap)};
         let mut last_chunk_offset: usize = 0;
         for chunk_num in 0..NUM_CONSUMERS {
@@ -138,14 +138,14 @@ fn main() -> io::Result<()> {
             last_chunk_offset = new_line_data.1;
 
             let h = s.spawn(move || {
-                let mut station_map: BTreeMap<String, StationData> = BTreeMap::new();
+                let mut station_map: BTreeMap<&str, StationData> = BTreeMap::new();
                 let lines = unsafe{from_utf8_unchecked(current_chunk_slice)};
                 for line in lines.lines() {
                     let (name, temp) = StationData::parse_data(&line);
                     match station_map.get_mut(name) {
                         Some(station) => station.update_from(temp),
                         None => {
-                            station_map.insert(name.to_owned(), StationData::new(temp));
+                            station_map.insert(name, StationData::new(temp));
                         }
                     };
                 }
@@ -153,7 +153,7 @@ fn main() -> io::Result<()> {
             });
             handlers.push(h);
         }
-        let station_map: BTreeMap<String, StationData> = BTreeMap::new();
+        let station_map: BTreeMap<&str, StationData> = BTreeMap::new();
         handlers.into_iter().fold(station_map, |s1, s2| {
             let inner_station = s2.join().unwrap();
             merge_btrees(s1, inner_station)
