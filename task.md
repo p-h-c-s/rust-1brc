@@ -29,3 +29,5 @@ https://aquasecurity.github.io/tracee/v0.16/docs/events/builtin/syscalls/madvise
 https://stackoverflow.com/questions/7222164/mmap-an-entire-large-file
 
 sudo cargo flamegraph -r --flamechart  -- measurements.txt
+
+fastest run with 31 threads on mac m1: 80.97s user 13.88s system 545% cpu 17.392 total

@@ -142,9 +142,7 @@ fn process_chunk<'a>(current_chunk_slice: &'a [u8]) -> HashMap<&'a str, StationD
     str_slice.lines().map(|l| StationData::parse_data(l)).for_each(|(name, temp)| {
         match station_map.get_mut(name) {
             Some(station) => station.update_from(temp),
-            None => {
-                station_map.insert(name, StationData::new(temp));
-            }
+            None => { station_map.insert(name, StationData::new(temp)); }
         };
     });
     return station_map;
@@ -153,6 +151,7 @@ fn process_chunk<'a>(current_chunk_slice: &'a [u8]) -> HashMap<&'a str, StationD
 fn process_mmap<'scope, 'env>(mmap: &'env [u8], chunk_size: usize, s: &'scope Scope<'scope, 'env>) -> HashMap<&'env str, StationData> {
     let mut handlers: Vec<ScopedJoinHandle<HashMap<&str, StationData>>> = Vec::new();
     let mut last_chunk_offset: usize = 0;
+
     for chunk_num in 0..NUM_CONSUMERS {
         let new_line_data = get_nearest_newline(mmap, chunk_num, chunk_size, last_chunk_offset);
         let current_chunk_slice = new_line_data.0;
@@ -161,7 +160,8 @@ fn process_mmap<'scope, 'env>(mmap: &'env [u8], chunk_size: usize, s: &'scope Sc
         let h = s.spawn(move || process_chunk(current_chunk_slice));
         handlers.push(h);
     }
-    let mut station_map: HashMap<&str, StationData> = HashMap::new();
+
+    let mut station_map: HashMap<&str, StationData> = HashMap::with_capacity(MAX_STATIONS);
     for h in handlers {
         let inner_station = h.join().unwrap();
         station_map = merge_hash(station_map, inner_station);
