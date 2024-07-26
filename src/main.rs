@@ -4,7 +4,7 @@ use std::fs::File;
 use std::io::{prelude::*, BufReader};
 use std::io;
 use std::rc::Rc;
-use std::str::from_utf8;
+use std::str::{from_utf8, from_utf8_unchecked};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread::{self, ScopedJoinHandle};
@@ -53,10 +53,6 @@ impl StationData {
         (name.to_owned(), temp.parse::<f64>().unwrap())
     }
 
-    // fn parse_line_buff<'a>(line_buff: &'a str) -> impl Iterator<Item = &'a str> {
-    //     line_buff.lin
-    // }
-
 }
 
 // merges src into dest, consuming both
@@ -82,9 +78,9 @@ fn get_round_robin<'a, T>(v: &'a Vec<T>, mut state: usize) -> (&'a T, usize) {
 
 // find the nearest newline to the end of the given chunk.
 // chunk_num should  start at 0
-fn get_nearest_newline<'a>(slice: &'a str, chunk_num: usize, chunk_size: usize, last_chunk_offset: usize) -> (&'a str, usize) {
+fn get_nearest_newline<'a>(slice: &'a [u8], chunk_num: usize, chunk_size: usize, last_chunk_offset: usize) -> (&'a [u8], usize) {
     let end_idx = (chunk_num + 1) * chunk_size;
-    match slice[end_idx..].find('\n') {
+    match slice[end_idx..].iter().position(|x| *x == b'\n') {
         Some(i) => (&slice[(end_idx-chunk_size+last_chunk_offset)..(i+end_idx)], i+1), //+1 cause start of slice is inclusive
         None => (&slice[(end_idx-chunk_size+last_chunk_offset)..(end_idx)], 0)
     }
@@ -96,7 +92,7 @@ const MAX_STATION_NAME_SIZE: usize = 100;
 // 5 bytes for two digit float number with a single fractional digit and `;` character
 // idea to divide file: pad each line up to MAX_LINE_SIZE bytes
 const MAX_LINE_SIZE: usize = MAX_STATION_NAME_SIZE + 5;
-const NUM_CONSUMERS: usize = 2;
+const NUM_CONSUMERS: usize = 8;
 
 fn main() -> io::Result<()> {
     // won't accept non-utf-8 args
@@ -105,7 +101,6 @@ fn main() -> io::Result<()> {
         Some(fname) => fname,
         None => "measurements.txt",
     };
-    // let station_map: [StationData; MAX_STATIONS] = [StationData; MAX_STATIONS];
 
     println!("Reading from {:}", file_name);
 
@@ -115,15 +110,12 @@ fn main() -> io::Result<()> {
 
     let chunk_size = f_size as usize / NUM_CONSUMERS;
 
-    // works, but is memory intensive
-    // Memory limited implementation, but very fast IO
-
     let station_map = thread::scope(|s|{
-        let mut handlers = Vec::new();
-        let file_string_slice = from_utf8(mmap).unwrap();
+        let mut handlers: Vec<ScopedJoinHandle<BTreeMap<String, StationData>>> = Vec::new();
+        // let file_string_slice = unsafe {from_utf8_unchecked(mmap)};
         let mut last_chunk_offset: usize = 0;
         for chunk_num in 0..NUM_CONSUMERS {
-            let new_line_data = get_nearest_newline(file_string_slice, chunk_num, chunk_size, last_chunk_offset);
+            let new_line_data = get_nearest_newline(mmap, chunk_num, chunk_size, last_chunk_offset);
             let current_chunk_slice = new_line_data.0;
             last_chunk_offset = new_line_data.1;
 
@@ -131,8 +123,9 @@ fn main() -> io::Result<()> {
                 let refe = chunk_num;
                 let refe2 = last_chunk_offset;
                 let mut station_map: BTreeMap<String, StationData> = BTreeMap::new();
+                let lines = unsafe{from_utf8_unchecked(current_chunk_slice)};
                 loop {
-                    for line in current_chunk_slice.lines() {
+                    for line in lines.lines() {
                         let (name, temp) = StationData::parse_data(&line);
                         match station_map.get_mut(&name) {
                             Some(station) => station.update_from(temp),

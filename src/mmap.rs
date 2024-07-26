@@ -3,7 +3,7 @@ use std::ptr::{null_mut, NonNull};
 use std::{fs::File, os::raw::c_void};
 
 use libc::{mmap, size_t};
-use libc::{munmap, PROT_READ, PROT_WRITE, MAP_SHARED, MAP_FAILED};
+use libc::{munmap, PROT_READ, PROT_WRITE, MAP_PRIVATE, MAP_FAILED};
 
 pub struct Mmap<'a> {
     mmap_slice: &'a mut [u8],
@@ -23,7 +23,7 @@ impl<'a> Mmap<'a> {
     pub fn from_file(f: File) -> &'a [u8] {
         let size = f.metadata().unwrap().len() as size_t;
         let prot = PROT_READ;
-        let flags =  MAP_SHARED;
+        let flags = MAP_PRIVATE;
         unsafe {
             let m = mmap(null_mut(), size, prot, flags, f.as_raw_fd(), 0);
             if m == MAP_FAILED {
