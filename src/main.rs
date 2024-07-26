@@ -1,21 +1,20 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
+use std::fmt;
 use std::fs::File;
 use std::io;
-use std::io::{prelude::*, BufReader};
-use std::rc::Rc;
-use std::str::{from_utf8, from_utf8_unchecked};
-use std::sync::mpsc::{Receiver, Sender};
-use std::sync::{mpsc, Arc, Mutex};
+use std::io::prelude::*;
+use std::str::from_utf8_unchecked;
 use std::thread::{self, Scope, ScopedJoinHandle};
-use std::{default, env};
-use std::fmt;
-
-use mmap::Mmap;
+use std::env;
 
 pub mod mmap;
 
-// station_name limitations: 100 bytes max
-// treat temperature as 3
+// Defined in challenge spec
+const MAX_STATIONS: usize = 10000;
+// Parallelism
+const NUM_CONSUMERS: usize = 31;
+const FIXED_POINT_DIVISOR: f64 = 10.0;
+
 struct StationData {
     min_temp: i32,
     max_temp: i32,
@@ -25,11 +24,18 @@ struct StationData {
 
 impl fmt::Display for StationData {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mean = (self.temp_sum as f64 / TEMP_DIVISOR) / self.count as f64;
-        write!(f, "{:.1}/{:.1}/{:.1}", (self.min_temp as f64 / TEMP_DIVISOR), mean, (self.max_temp as f64 / TEMP_DIVISOR))
+        write!(
+            f,
+            "{:.1}/{:.1}/{:.1}",
+            (self.min_temp as f64 / FIXED_POINT_DIVISOR),
+            self.get_mean(),
+            (self.max_temp as f64 / FIXED_POINT_DIVISOR)
+        )
     }
 }
 
+/// Efficiently handles station statistics. Avoids using floating-point arithmetic to speed-up processing.
+/// The mean is only calculated on 
 impl StationData {
     fn new(temp: i32) -> Self {
         Self {
@@ -38,6 +44,10 @@ impl StationData {
             count: 1,
             temp_sum: temp,
         }
+    }
+
+    fn get_mean(&self) -> f64 {
+        (self.temp_sum as f64 / self.count as f64) / FIXED_POINT_DIVISOR
     }
 
     #[inline]
@@ -84,7 +94,8 @@ impl StationData {
     }
 }
 
-// merges src into dest, consuming both
+/// Merges src into dest, consuming both and returning dest.
+/// Initally the entry api was used, but the current method with get_mut is slightly faster
 fn merge_hash<'a>(
     mut dest: HashMap<&'a str, StationData>,
     src: HashMap<&'a str, StationData>,
@@ -101,8 +112,9 @@ fn merge_hash<'a>(
     dest
 }
 
-// find the nearest newline to the end of the given chunk.
-// chunk_num should  start at 0
+/// Returns a slice chunk of size: chunk_size + n, where n is the extra space between the end of
+/// the current chunk and the next newline. This makes sure each chunk has whole lines.
+/// The input `last_chunk_offset` is needed in order to make sure we don't overlap chunks.
 fn get_nearest_newline<'a>(
     slice: &'a [u8],
     chunk_num: usize,
@@ -122,20 +134,9 @@ fn get_nearest_newline<'a>(
     }
 }
 
-// Defined in challenge spec
-const MAX_STATIONS: usize = 10000;
-const MAX_STATION_NAME_SIZE: usize = 100;
-// 5 bytes for two digit float number with a single fractional digit and `;` character
-// idea to divide file: pad each line up to MAX_LINE_SIZE bytes
-const MAX_LINE_SIZE: usize = MAX_STATION_NAME_SIZE + 5;
-// fixme: NUM_CONSUMERS might not be larger than lines of file
-const NUM_CONSUMERS: usize = 31;
-const TEMP_DIVISOR: f64 = 10.0;
-
-
 fn process_chunk<'a>(current_chunk_slice: &'a [u8]) -> HashMap<&'a str, StationData> {
     // Mmap::set_sequential_advise(current_chunk_slice);
-    let mut station_map: HashMap<&str, StationData> = HashMap::new();
+    let mut station_map: HashMap<&str, StationData> = HashMap::with_capacity(MAX_STATIONS);
     let lines = unsafe { from_utf8_unchecked(current_chunk_slice) };
     for line in lines.lines() {
         let (name, temp) = StationData::parse_data(&line);
@@ -151,9 +152,7 @@ fn process_chunk<'a>(current_chunk_slice: &'a [u8]) -> HashMap<&'a str, StationD
 
 fn process_mmap<'scope, 'env>(mmap: &'env [u8], chunk_size: usize, s: &'scope Scope<'scope, 'env>) {
     let mut handlers: Vec<ScopedJoinHandle<HashMap<&str, StationData>>> = Vec::new();
-    // let file_string_slice = unsafe {from_utf8_unchecked(mmap)};
     let mut last_chunk_offset: usize = 0;
-    let lines = unsafe { from_utf8_unchecked(&mmap) };
     for chunk_num in 0..NUM_CONSUMERS {
         let new_line_data = get_nearest_newline(mmap, chunk_num, chunk_size, last_chunk_offset);
         let current_chunk_slice = new_line_data.0;
@@ -175,7 +174,7 @@ fn process_mmap<'scope, 'env>(mmap: &'env [u8], chunk_size: usize, s: &'scope Sc
         v.sort_by_key(|e| e.0);
         v
     };
-    for (k, v) in vec[0..vec.len()-1].iter() {
+    for (k, v) in vec[0..vec.len() - 1].iter() {
         write!(stdout, "{}={}, ", k, v).unwrap();
     }
     let last_item = vec.last().unwrap();
@@ -187,14 +186,14 @@ fn main() -> io::Result<()> {
     let args: Vec<String> = env::args().collect();
     let file_name = match args.get(2).clone() {
         Some(fname) => fname,
-        None => "head.txt",
+        None => "measurements.txt",
     };
 
     println!("Reading from {:}", file_name);
 
     let f = File::open(file_name)?;
     let f_size = f.metadata().unwrap().len();
-    let mmap = mmap::Mmap::from_file(f);
+    let mmap = &mmap::Mmap::from_file(f);
 
     let chunk_size = f_size as usize / NUM_CONSUMERS;
 
