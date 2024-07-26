@@ -30,11 +30,6 @@ impl StationData {
         }
     }
 
-    // #[inline]
-    // fn running_avg(&self, temp: f64) -> f64 {
-    //     (self.mean_temp * (self.times_seen - 1.0) + temp) / self.times_seen
-    // }
-
     fn update_from(&mut self, temp: i32) {
         self.max_temp = self.max_temp.max(temp);
         self.min_temp = self.min_temp.min(temp);
@@ -71,9 +66,9 @@ impl StationData {
     }
 
     // slow!
-    fn parse_data<'a>(raw: &str) -> (String, i32) {
+    fn parse_data<'a>(raw: &'a str) -> (&'a str, i32) {
         let (name, temp) = raw.split_once(";").unwrap();
-        (name.to_owned(), Self::parse_temp(temp))
+        (name, Self::parse_temp(temp))
     }
 
 }
@@ -115,7 +110,7 @@ const MAX_STATION_NAME_SIZE: usize = 100;
 // 5 bytes for two digit float number with a single fractional digit and `;` character
 // idea to divide file: pad each line up to MAX_LINE_SIZE bytes
 const MAX_LINE_SIZE: usize = MAX_STATION_NAME_SIZE + 5;
-const NUM_CONSUMERS: usize = 8;
+const NUM_CONSUMERS: usize = 16;
 
 fn main() -> io::Result<()> {
     // won't accept non-utf-8 args
@@ -143,22 +138,18 @@ fn main() -> io::Result<()> {
             last_chunk_offset = new_line_data.1;
 
             let h = s.spawn(move || {
-                let refe = chunk_num;
-                let refe2 = last_chunk_offset;
                 let mut station_map: BTreeMap<String, StationData> = BTreeMap::new();
                 let lines = unsafe{from_utf8_unchecked(current_chunk_slice)};
-                loop {
-                    for line in lines.lines() {
-                        let (name, temp) = StationData::parse_data(&line);
-                        match station_map.get_mut(&name) {
-                            Some(station) => station.update_from(temp),
-                            None => {
-                                station_map.insert(name, StationData::new(temp));
-                            }
-                        };
-                    }
-                    return station_map;
+                for line in lines.lines() {
+                    let (name, temp) = StationData::parse_data(&line);
+                    match station_map.get_mut(name) {
+                        Some(station) => station.update_from(temp),
+                        None => {
+                            station_map.insert(name.to_owned(), StationData::new(temp));
+                        }
+                    };
                 }
+                return station_map;
             });
             handlers.push(h);
         }
