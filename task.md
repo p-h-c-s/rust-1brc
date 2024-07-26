@@ -34,3 +34,9 @@ https://stackoverflow.com/questions/7222164/mmap-an-entire-large-file
 java bench on battery:  80.52s user 18.94s system 357% cpu 27.817 total
 
 rust bench on battery: 237.96s user 25.23s system 657% cpu 40.027 total
+
+rust bench on power: 143.98s user 17.12s system 614% cpu 26.200 total
+
+java bench on power: 34.02s user 8.34s system 232% cpu 18.199 total
+
+rust bench on power and hashmap: 82.22s user 16.70s system 531% cpu 18.606 total

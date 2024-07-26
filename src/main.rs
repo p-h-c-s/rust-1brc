@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io;
 use std::io::{prelude::*, BufReader};
@@ -8,6 +8,7 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread::{self, Scope, ScopedJoinHandle};
 use std::{default, env};
+use std::fmt;
 
 use mmap::Mmap;
 
@@ -20,6 +21,20 @@ struct StationData {
     max_temp: i32,
     count: i32,
     temp_sum: i32,
+}
+
+// To use the `{}` marker, the trait `fmt::Display` must be implemented
+// manually for the type.
+impl fmt::Display for StationData {
+    // This trait requires `fmt` with this exact signature.
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // Write strictly the first element into the supplied output
+        // stream: `f`. Returns `fmt::Result` which indicates whether the
+        // operation succeeded or failed. Note that `write!` uses syntax which
+        // is very similar to `println!`.
+        let mean = (self.temp_sum as f64 / TEMP_DIVISOR) / self.count as f64;
+        write!(f, "{:.1}/{:.1}/{:.1}", (self.min_temp as f64 / TEMP_DIVISOR), mean, (self.max_temp as f64 / TEMP_DIVISOR))
+    }
 }
 
 impl StationData {
@@ -44,7 +59,7 @@ impl StationData {
         self.max_temp = self.max_temp.max(src.max_temp);
         self.min_temp = self.min_temp.min(src.min_temp);
         self.temp_sum += src.temp_sum;
-        self.count += 1;
+        self.count += src.count;
     }
 
     #[inline]
@@ -77,10 +92,10 @@ impl StationData {
 }
 
 // merges src into dest, consuming both
-fn merge_btrees<'a>(
-    mut dest: BTreeMap<&'a str, StationData>,
-    src: BTreeMap<&'a str, StationData>,
-) -> BTreeMap<&'a str, StationData> {
+fn merge_hash<'a>(
+    mut dest: HashMap<&'a str, StationData>,
+    src: HashMap<&'a str, StationData>,
+) -> HashMap<&'a str, StationData> {
     src.into_iter()
         .for_each(|(src_key, src_val)| match dest.get_mut(&src_key) {
             Some(dest_v) => {
@@ -91,12 +106,6 @@ fn merge_btrees<'a>(
             }
         });
     dest
-}
-
-fn get_round_robin<'a, T>(v: &'a Vec<T>, mut state: usize) -> (&'a T, usize) {
-    let item = v.get(state % v.len()).unwrap();
-    state += 1;
-    (item, state)
 }
 
 // find the nearest newline to the end of the given chunk.
@@ -126,11 +135,14 @@ const MAX_STATION_NAME_SIZE: usize = 100;
 // 5 bytes for two digit float number with a single fractional digit and `;` character
 // idea to divide file: pad each line up to MAX_LINE_SIZE bytes
 const MAX_LINE_SIZE: usize = MAX_STATION_NAME_SIZE + 5;
+// fixme: NUM_CONSUMERS might not be larger than lines of file
 const NUM_CONSUMERS: usize = 31;
+const TEMP_DIVISOR: f64 = 10.0;
 
-fn process_chunk<'a>(current_chunk_slice: &'a [u8]) -> BTreeMap<&'a str, StationData> {
+
+fn process_chunk<'a>(current_chunk_slice: &'a [u8]) -> HashMap<&'a str, StationData> {
     // Mmap::set_sequential_advise(current_chunk_slice);
-    let mut station_map: BTreeMap<&str, StationData> = BTreeMap::new();
+    let mut station_map: HashMap<&str, StationData> = HashMap::new();
     let lines = unsafe { from_utf8_unchecked(current_chunk_slice) };
     for line in lines.lines() {
         let (name, temp) = StationData::parse_data(&line);
@@ -145,7 +157,7 @@ fn process_chunk<'a>(current_chunk_slice: &'a [u8]) -> BTreeMap<&'a str, Station
 }
 
 fn process_mmap<'scope, 'env>(mmap: &'env [u8], chunk_size: usize, s: &'scope Scope<'scope, 'env>) {
-    let mut handlers: Vec<ScopedJoinHandle<BTreeMap<&str, StationData>>> = Vec::new();
+    let mut handlers: Vec<ScopedJoinHandle<HashMap<&str, StationData>>> = Vec::new();
     // let file_string_slice = unsafe {from_utf8_unchecked(mmap)};
     let mut last_chunk_offset: usize = 0;
     let lines = unsafe { from_utf8_unchecked(&mmap) };
@@ -157,17 +169,21 @@ fn process_mmap<'scope, 'env>(mmap: &'env [u8], chunk_size: usize, s: &'scope Sc
         let h = s.spawn(move || process_chunk(current_chunk_slice));
         handlers.push(h);
     }
-    let mut station_map: BTreeMap<&str, StationData> = BTreeMap::new();
+    let mut station_map: HashMap<&str, StationData> = HashMap::new();
     for h in handlers {
         let inner_station = h.join().unwrap();
-        station_map = merge_btrees(station_map, inner_station);
+        station_map = merge_hash(station_map, inner_station);
     }
     // write to stdio
     let mut stdout = io::stdout().lock();
     stdout.write(b"{").unwrap();
-    for (k, v) in station_map.into_iter() {
-        // ("{}={}/{}/{}", k, v.min_temp, v.mean_temp, v.max_temp)
-        write!(stdout, "{}={}/{}/{}, ", k, v.min_temp, v.count, v.max_temp).unwrap();
+    let vec = {
+        let mut v = Vec::from_iter(station_map);
+        v.sort_by_key(|e| e.0);
+        v
+    };
+    for (k, v) in vec {
+        write!(stdout, "{}={}, ", k, v).unwrap();
     }
     stdout.write(b"}").unwrap();
 }
@@ -177,7 +193,7 @@ fn main() -> io::Result<()> {
     let args: Vec<String> = env::args().collect();
     let file_name = match args.get(2).clone() {
         Some(fname) => fname,
-        None => "measurements.txt",
+        None => "head.txt",
     };
 
     println!("Reading from {:}", file_name);

@@ -8,3 +8,4 @@ El Paso;31.1
 Sarajevo;28.2
 Halifax;-0.2
 Bangui;16.6
+Bangui;-25.6

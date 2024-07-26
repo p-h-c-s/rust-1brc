@@ -31,7 +31,7 @@ impl<'a> Mmap<'a> {
             if m == MAP_FAILED {
                 panic!("mmap failed");
             }
-            madvise(m, size, MADV_WILLNEED);
+            // madvise(m, size, MADV_WILLNEED);
             return std::slice::from_raw_parts(m as *const u8, size);
         }
     }
@@ -39,7 +39,7 @@ impl<'a> Mmap<'a> {
     pub fn set_sequential_advise(m: &[u8]) {
         unsafe {
             let ptr = m.as_ptr() as *mut c_void;
-            madvise(ptr, m.len(), MADV_WILLNEED);
+            madvise(ptr, m.len(), MADV_SEQUENTIAL);
         }
     }
 }
