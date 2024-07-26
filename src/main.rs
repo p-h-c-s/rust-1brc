@@ -12,45 +12,68 @@ use std::thread::{self, ScopedJoinHandle};
 pub mod mmap;
 
 // station_name limitations: 100 bytes max
+// treat temperature as 3
 struct StationData {
-    min_temp: f64,
-    max_temp: f64,
-    mean_temp: f64,
-    times_seen: f64,
+    min_temp: i32,
+    max_temp: i32,
+    count: i32,
+    temp_sum: i32,
 }
 
 impl StationData {
-    fn new(temp: f64) -> Self {
+    fn new(temp: i32) -> Self {
         Self {
             min_temp: temp,
             max_temp: temp,
-            mean_temp: temp,
-            times_seen: temp,
+            count: 1,
+            temp_sum: temp,
         }
     }
 
-    #[inline]
-    fn running_avg(&self, temp: f64) -> f64 {
-        (self.mean_temp * (self.times_seen - 1.0) + temp) / self.times_seen
-    }
+    // #[inline]
+    // fn running_avg(&self, temp: f64) -> f64 {
+    //     (self.mean_temp * (self.times_seen - 1.0) + temp) / self.times_seen
+    // }
 
-    fn update_from(&mut self, temp: f64) {
+    fn update_from(&mut self, temp: i32) {
         self.max_temp = self.max_temp.max(temp);
         self.min_temp = self.min_temp.min(temp);
-        self.mean_temp = self.running_avg(temp);
-        self.times_seen += 1.0;
+        self.count += 1;
+        self.temp_sum += temp;
     }
 
     fn update_from_station(&mut self, src: Self) {
         self.max_temp = self.max_temp.max(src.max_temp);
         self.min_temp = self.min_temp.min(src.min_temp);
-        self.mean_temp = self.running_avg(src.mean_temp);
-        self.times_seen += 1.0;
+        self.temp_sum += src.temp_sum;
+        self.count += 1;
     }
+
+    fn parse_temp<'a>(temp: &'a str) -> i32 {
+        let mut result: i32 = 0;
+        let mut negative: bool = false;
+        for (i, ch) in temp.chars().enumerate() {
+            match ch {
+                '0'..='9' => {
+                    result = result * 10 + (ch as i32 - '0' as i32);
+                },
+                '.' => {}
+                '-' => {
+                    negative = true;
+                }
+                _ => panic!("wrong format for str")
+            }
+        }
+        if negative {
+            return -result;
+        }
+        result
+    }
+
     // slow!
-    fn parse_data<'a>(raw: &str) -> (String, f64) {
+    fn parse_data<'a>(raw: &str) -> (String, i32) {
         let (name, temp) = raw.split_once(";").unwrap();
-        (name.to_owned(), temp.parse::<f64>().unwrap())
+        (name.to_owned(), Self::parse_temp(temp))
     }
 
 }
@@ -155,7 +178,7 @@ fn main() -> io::Result<()> {
             write!(
                 stdout,
                 "{}={}/{}/{}, ",
-                k, v.min_temp.round(), v.mean_temp.round(), v.max_temp.round()
+                k, v.min_temp, v.count, v.max_temp
             ).unwrap();
         }
         stdout.write(b"}").unwrap();
