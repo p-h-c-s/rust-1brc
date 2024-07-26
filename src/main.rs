@@ -82,11 +82,11 @@ fn get_round_robin<'a, T>(v: &'a Vec<T>, mut state: usize) -> (&'a T, usize) {
 
 // find the nearest newline to the end of the given chunk.
 // chunk_num should  start at 0
-fn get_nearest_newline<'a>(slice: &'a str, chunk_num: usize, chunk_size: usize) -> Result<&'a str, ()> {
+fn get_nearest_newline<'a>(slice: &'a str, chunk_num: usize, chunk_size: usize, last_chunk_offset: usize) -> (&'a str, usize) {
     let end_idx = (chunk_num + 1) * chunk_size;
     match slice[end_idx..].find('\n') {
-        Some(i) => Ok(&slice[(end_idx-chunk_size)..i+1]),
-        None => Err(())
+        Some(i) => (&slice[(end_idx-chunk_size+last_chunk_offset)..(i+end_idx)], i+1), //+1 cause start of slice is inclusive
+        None => (&slice[(end_idx-chunk_size+last_chunk_offset)..(end_idx)], 0)
     }
 }
 
@@ -103,7 +103,7 @@ fn main() -> io::Result<()> {
     let args: Vec<String> = env::args().collect();
     let file_name = match args.get(2).clone() {
         Some(fname) => fname,
-        None => "head.txt",
+        None => "measurements.txt",
     };
     // let station_map: [StationData; MAX_STATIONS] = [StationData; MAX_STATIONS];
 
@@ -121,27 +121,27 @@ fn main() -> io::Result<()> {
     let station_map = thread::scope(|s|{
         let mut handlers = Vec::new();
         let file_string_slice = from_utf8(mmap).unwrap();
+        let mut last_chunk_offset: usize = 0;
         for chunk_num in 0..NUM_CONSUMERS {
-            let curren_chunk_slice = get_nearest_newline(file_string_slice, chunk_num, chunk_size);
+            let new_line_data = get_nearest_newline(file_string_slice, chunk_num, chunk_size, last_chunk_offset);
+            let current_chunk_slice = new_line_data.0;
+            last_chunk_offset = new_line_data.1;
 
             let h = s.spawn(move || {
+                let refe = chunk_num;
+                let refe2 = last_chunk_offset;
                 let mut station_map: BTreeMap<String, StationData> = BTreeMap::new();
                 loop {
-                    if let Ok(chunk_slice) = curren_chunk_slice {
-                        for line in chunk_slice.lines() {
-                            // let fmt_line = &line[0..line.len()-1]; // remove newline
-                            let (name, temp) = StationData::parse_data(&line);
-                            match station_map.get_mut(&name) {
-                                Some(station) => station.update_from(temp),
-                                None => {
-                                    station_map.insert(name, StationData::new(temp));
-                                }
-                            };
-                        }
-                        return station_map;
-                    } else {
-                        return station_map;
+                    for line in current_chunk_slice.lines() {
+                        let (name, temp) = StationData::parse_data(&line);
+                        match station_map.get_mut(&name) {
+                            Some(station) => station.update_from(temp),
+                            None => {
+                                station_map.insert(name, StationData::new(temp));
+                            }
+                        };
                     }
+                    return station_map;
                 }
             });
             handlers.push(h);
