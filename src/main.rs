@@ -35,7 +35,7 @@ impl fmt::Display for StationData {
 }
 
 /// Efficiently handles station statistics. Avoids using floating-point arithmetic to speed-up processing.
-/// The mean is only calculated on 
+/// The mean is only calculated on demand, so we avoid calculating it as we read the file
 impl StationData {
     fn new(temp: i32) -> Self {
         Self {
@@ -78,7 +78,7 @@ impl StationData {
                 '-' => {
                     negative = true;
                 }
-                _ => panic!("wrong format for temp"),
+                _ => panic!("wrong format for temperature"),
             }
         }
         if negative {
@@ -134,23 +134,23 @@ fn get_nearest_newline<'a>(
     }
 }
 
+/// Parses a chunk of the input as StationData values. Assumes the input data contains
+/// valid utf-8 strings. Also assumes the input data contains whole lines as defined by the challenge
 fn process_chunk<'a>(current_chunk_slice: &'a [u8]) -> HashMap<&'a str, StationData> {
-    // Mmap::set_sequential_advise(current_chunk_slice);
     let mut station_map: HashMap<&str, StationData> = HashMap::with_capacity(MAX_STATIONS);
-    let lines = unsafe { from_utf8_unchecked(current_chunk_slice) };
-    for line in lines.lines() {
-        let (name, temp) = StationData::parse_data(&line);
+    let str_slice = unsafe { from_utf8_unchecked(current_chunk_slice) };
+    str_slice.lines().map(|l| StationData::parse_data(l)).for_each(|(name, temp)| {
         match station_map.get_mut(name) {
             Some(station) => station.update_from(temp),
             None => {
                 station_map.insert(name, StationData::new(temp));
             }
         };
-    }
+    });
     return station_map;
 }
 
-fn process_mmap<'scope, 'env>(mmap: &'env [u8], chunk_size: usize, s: &'scope Scope<'scope, 'env>) {
+fn process_mmap<'scope, 'env>(mmap: &'env [u8], chunk_size: usize, s: &'scope Scope<'scope, 'env>) -> HashMap<&'env str, StationData> {
     let mut handlers: Vec<ScopedJoinHandle<HashMap<&str, StationData>>> = Vec::new();
     let mut last_chunk_offset: usize = 0;
     for chunk_num in 0..NUM_CONSUMERS {
@@ -166,19 +166,8 @@ fn process_mmap<'scope, 'env>(mmap: &'env [u8], chunk_size: usize, s: &'scope Sc
         let inner_station = h.join().unwrap();
         station_map = merge_hash(station_map, inner_station);
     }
-    // write to stdio
-    let mut stdout = io::stdout().lock();
-    stdout.write(b"{").unwrap();
-    let vec = {
-        let mut v = Vec::from_iter(station_map);
-        v.sort_by_key(|e| e.0);
-        v
-    };
-    for (k, v) in vec[0..vec.len() - 1].iter() {
-        write!(stdout, "{}={}, ", k, v).unwrap();
-    }
-    let last_item = vec.last().unwrap();
-    write!(stdout, "{}={}}}", last_item.0, last_item.1).unwrap();
+    station_map
+
 }
 
 fn main() -> io::Result<()> {
@@ -188,16 +177,27 @@ fn main() -> io::Result<()> {
         Some(fname) => fname,
         None => "measurements.txt",
     };
-
-    println!("Reading from {:}", file_name);
-
     let f = File::open(file_name)?;
     let f_size = f.metadata().unwrap().len();
     let mmap = &mmap::Mmap::from_file(f);
-
     let chunk_size = f_size as usize / NUM_CONSUMERS;
 
-    thread::scope(|s| process_mmap(mmap, chunk_size, s));
+    thread::scope(|s| {
+        let station_map = process_mmap(mmap, chunk_size, s);
+
+        let mut stdout = io::stdout().lock();
+        stdout.write(b"{").unwrap();
+        let sorted_key_value_vec = {
+            let mut v = Vec::from_iter(station_map);
+            v.sort_by_key(|e| e.0);
+            v
+        };
+        let (last, vec_content) = sorted_key_value_vec.split_last().unwrap();
+        for (k, v) in vec_content{
+            write!(stdout, "{}={}, ", k, v).unwrap();
+        }
+        write!(stdout, "{}={}}}", last.0, last.1).unwrap();
+    });
 
     Ok(())
 }
