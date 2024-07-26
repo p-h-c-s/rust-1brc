@@ -9,6 +9,8 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread::{self, Scope, ScopedJoinHandle};
 
+use mmap::Mmap;
+
 pub mod mmap;
 
 // station_name limitations: 100 bytes max
@@ -109,9 +111,10 @@ const MAX_STATION_NAME_SIZE: usize = 100;
 // 5 bytes for two digit float number with a single fractional digit and `;` character
 // idea to divide file: pad each line up to MAX_LINE_SIZE bytes
 const MAX_LINE_SIZE: usize = MAX_STATION_NAME_SIZE + 5;
-const NUM_CONSUMERS: usize = 8;
+const NUM_CONSUMERS: usize = 31;
 
 fn process_chunk<'a>(current_chunk_slice: &'a [u8]) -> BTreeMap<&'a str, StationData>{
+    Mmap::set_sequential_advise(current_chunk_slice);
     let mut station_map: BTreeMap<&str, StationData> = BTreeMap::new();
     let lines = unsafe{from_utf8_unchecked(current_chunk_slice)};
     for line in lines.lines() {

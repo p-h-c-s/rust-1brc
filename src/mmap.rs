@@ -3,7 +3,7 @@ use std::ptr::{null_mut, NonNull};
 use std::{fs::File, os::raw::c_void};
 
 use libc::{mmap, size_t};
-use libc::{munmap, PROT_READ, PROT_WRITE, MAP_PRIVATE, MAP_FAILED};
+use libc::{munmap, PROT_READ, PROT_WRITE, MAP_PRIVATE, MAP_FAILED, madvise, MADV_SEQUENTIAL, MADV_WILLNEED};
 
 pub struct Mmap<'a> {
     mmap_slice: &'a mut [u8],
@@ -29,7 +29,15 @@ impl<'a> Mmap<'a> {
             if m == MAP_FAILED {
                 panic!("mmap failed");
             }
+            // madvise(m, size, MADV_SEQUENTIAL);
             return std::slice::from_raw_parts(m as *const u8, size)
+        }
+    }
+
+    pub fn set_sequential_advise(m: &[u8]) {
+        unsafe {
+            let ptr = m.as_ptr() as *mut c_void;
+            madvise(ptr, m.len(), MADV_WILLNEED);
         }
     }
 }
