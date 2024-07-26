@@ -175,13 +175,11 @@ fn process_mmap<'scope, 'env>(mmap: &'env [u8], chunk_size: usize, s: &'scope Sc
         v.sort_by_key(|e| e.0);
         v
     };
-    for (i, (k, v)) in vec.iter().enumerate() {
-        if i == vec.len() - 1 {
-            write!(stdout, "{}={}}}", k, v).unwrap();
-            continue;
-        }
+    for (k, v) in vec[0..vec.len()-1].iter() {
         write!(stdout, "{}={}, ", k, v).unwrap();
     }
+    let last_item = vec.last().unwrap();
+    write!(stdout, "{}={}}}", last_item.0, last_item.1).unwrap();
 }
 
 fn main() -> io::Result<()> {
