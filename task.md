@@ -13,8 +13,6 @@ Station name: non null UTF-8 string of min length 1 character and max length 100
 
 Temperature value: non null double between -99.9 (inclusive) and 99.9 (inclusive), always with one fractional digit
 
-
-
 <!-- cargo run -r src/main.rs measurements.txt | head -c 5000 -->
 
 To profile: 
@@ -30,13 +28,4 @@ https://aquasecurity.github.io/tracee/v0.16/docs/events/builtin/syscalls/madvise
 
 https://stackoverflow.com/questions/7222164/mmap-an-entire-large-file
 
-
-java bench on battery:  80.52s user 18.94s system 357% cpu 27.817 total
-
-rust bench on battery: 237.96s user 25.23s system 657% cpu 40.027 total
-
-rust bench on power: 143.98s user 17.12s system 614% cpu 26.200 total
-
-java bench on power: 34.02s user 8.34s system 232% cpu 18.199 total
-
-rust bench on power and hashmap: 82.22s user 16.70s system 531% cpu 18.606 total
+sudo cargo flamegraph -r --flamechart  -- measurements.txt
