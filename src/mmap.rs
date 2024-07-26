@@ -2,13 +2,15 @@ use std::os::fd::AsRawFd;
 use std::ptr::{null_mut, NonNull};
 use std::{fs::File, os::raw::c_void};
 
+use libc::{
+    madvise, munmap, MADV_SEQUENTIAL, MADV_WILLNEED, MAP_FAILED, MAP_PRIVATE, PROT_READ, PROT_WRITE,
+};
 use libc::{mmap, size_t};
-use libc::{munmap, PROT_READ, PROT_WRITE, MAP_PRIVATE, MAP_FAILED, madvise, MADV_SEQUENTIAL, MADV_WILLNEED};
 
 pub struct Mmap<'a> {
     mmap_slice: &'a mut [u8],
     mmap_addr: *mut NonNull<u8>,
-    f_len: usize
+    f_len: usize,
 }
 
 impl<'a> Drop for Mmap<'a> {
@@ -29,8 +31,8 @@ impl<'a> Mmap<'a> {
             if m == MAP_FAILED {
                 panic!("mmap failed");
             }
-            // madvise(m, size, MADV_SEQUENTIAL);
-            return std::slice::from_raw_parts(m as *const u8, size)
+            madvise(m, size, MADV_WILLNEED);
+            return std::slice::from_raw_parts(m as *const u8, size);
         }
     }
 
@@ -42,20 +44,16 @@ impl<'a> Mmap<'a> {
     }
 }
 
-
-
-
 #[cfg(test)]
 mod tests {
     use std::fs::File;
 
     use super::Mmap;
 
-
     #[test]
     fn test_mmap() {
         let f = File::open("sample.txt").unwrap();
-        
+
         let map = Mmap::from_file(f);
         let string = std::str::from_utf8(map).unwrap();
         let split = string.split_terminator("\n");

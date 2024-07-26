@@ -25,3 +25,12 @@ debug = true
 in cargo.toml
  -->
 sudo cargo flamegraph 
+
+https://aquasecurity.github.io/tracee/v0.16/docs/events/builtin/syscalls/madvise/
+
+https://stackoverflow.com/questions/7222164/mmap-an-entire-large-file
+
+
+java bench on battery:  80.52s user 18.94s system 357% cpu 27.817 total
+
+rust bench on battery: 237.96s user 25.23s system 657% cpu 40.027 total
