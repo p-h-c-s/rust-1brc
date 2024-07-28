@@ -2,10 +2,9 @@ use std::ops::Deref;
 use std::os::fd::AsRawFd;
 use std::ptr::null_mut;
 use std::{fs::File, os::raw::c_void};
+use std::mem;
 
-use libc::{
-    munmap,  mmap, size_t, MAP_FAILED, MAP_SHARED, PROT_READ,
-};
+use libc::{mmap, munmap, size_t, MAP_FAILED, MAP_SHARED, PROT_READ};
 
 /// Smart pointer type for a mmap. Handles munmap call.
 pub struct Mmap<'a> {
@@ -55,6 +54,60 @@ impl<'a> Mmap<'a> {
             return Self::new(std::slice::from_raw_parts(m as *const u8, size));
         }
     }
+
+    // pub fn line_chunk_iterator(num_chunks) -> Itera
+}
+
+pub struct MmapChunkIterator<'a> {
+    data: Mmap<'a>,
+    chunk_size: usize,
+}
+
+impl <'a> MmapChunkIterator<'a> {
+    fn with_consumers(mut self, consumers: usize) -> Self {
+        self.chunk_size = self.data.len() / consumers;
+        self
+    }
+
+    pub fn new(data: Mmap<'a>, num_consumers: usize) -> Self {
+        Self {
+            data,
+            chunk_size: 1,
+        }.with_consumers(num_consumers)
+    }
+}
+
+impl <'a> IntoIterator for Mmap<'a> {
+    type IntoIter = MmapChunkIterator<'a>;
+    type Item = &'a [u8];
+
+    fn into_iter(self) -> Self::IntoIter {
+        MmapChunkIterator {
+            data: self,
+            chunk_size: 1,
+        }
+    }
+}
+
+impl<'a> Iterator for MmapChunkIterator<'a> {
+    type Item = &'a [u8];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.data.is_empty() {
+            return None;
+        }
+
+        let chunk_end = self.chunk_size.min(self.data.len());
+        let chunk = &self.data[..chunk_end];
+
+        // Find the last newline in the chunk
+        let split_at = chunk.iter().rposition(|&x| x == b'\n').map(|i| i + 1).unwrap_or(chunk_end);
+
+        let (result, rest) = self.data.mmap_slice.split_at(split_at);
+        self.data.mmap_slice = rest;
+
+        Some(result)
+    }
 }
 
 #[cfg(test)]
@@ -82,9 +135,26 @@ mod tests {
         create_test_file(test_file_path, test_content);
         let file = File::open(test_file_path).unwrap();
 
-        let my_struct = Mmap::from_file(file);
+        let mmap = Mmap::from_file(file);
 
-        assert_eq!(&*my_struct, test_content);
+        assert_eq!(&*mmap, test_content);
         remove_test_file(test_file_path);
     }
+
+    // #[test]
+    // fn test_iterator() {
+    //     let test_file_path = Path::new("test_file.txt");
+    //     let test_content = b"Hello, mmap!";
+    //     create_test_file(test_file_path, test_content);
+    //     let file = File::open(test_file_path).unwrap();
+
+    //     let mmap = Mmap::from_file(file);
+
+    //     for chunk in mmap {
+
+    //     }
+
+    //     assert_eq!(&*mmap, test_content);
+    //     remove_test_file(test_file_path);
+    // }
 }

@@ -1,17 +1,19 @@
 use std::collections::HashMap;
+use std::env;
 use std::fmt;
 use std::fs::File;
 use std::io;
 use std::io::prelude::*;
 use std::str::from_utf8_unchecked;
 use std::thread::{self, Scope, ScopedJoinHandle};
-use std::env;
+
+use mmap::Mmap;
+use mmap::MmapChunkIterator;
 
 pub mod mmap;
 
 // Defined in challenge spec
 const MAX_STATIONS: usize = 10000;
-// Parallelism
 const NUM_CONSUMERS: usize = 31;
 const FIXED_POINT_DIVISOR: f64 = 10.0;
 
@@ -112,52 +114,33 @@ fn merge_hash<'a>(
     dest
 }
 
-/// Returns a slice chunk of size: chunk_size + n, where n is the extra space between the end of
-/// the current chunk and the next newline. This makes sure each chunk has whole lines.
-/// The input `last_chunk_offset` is needed in order to make sure we don't overlap chunks.
-fn get_nearest_newline<'a>(
-    slice: &'a [u8],
-    chunk_num: usize,
-    chunk_size: usize,
-    last_chunk_offset: usize,
-) -> (&'a [u8], usize) {
-    let end_idx = (chunk_num + 1) * chunk_size;
-    match slice[end_idx..].iter().position(|x| *x == b'\n') {
-        Some(i) => (
-            &slice[(end_idx - chunk_size + last_chunk_offset)..(i + end_idx)],
-            i + 1,
-        ), //+1 cause start of slice is inclusive
-        None => (
-            &slice[(end_idx - chunk_size + last_chunk_offset)..(end_idx)],
-            0,
-        ),
-    }
-}
-
 /// Parses a chunk of the input as StationData values. Assumes the input data contains
 /// valid utf-8 strings. Also assumes the input data contains whole lines as defined by the challenge
 fn process_chunk<'a>(current_chunk_slice: &'a [u8]) -> HashMap<&'a str, StationData> {
     let mut station_map: HashMap<&str, StationData> = HashMap::with_capacity(MAX_STATIONS);
     let str_slice = unsafe { from_utf8_unchecked(current_chunk_slice) };
-    str_slice.lines().map(|l| StationData::parse_data(l)).for_each(|(name, temp)| {
-        match station_map.get_mut(name) {
-            Some(station) => station.update_from(temp),
-            None => { station_map.insert(name, StationData::new(temp)); }
-        };
-    });
+    str_slice
+        .lines()
+        .map(|l| StationData::parse_data(l))
+        .for_each(|(name, temp)| {
+            match station_map.get_mut(name) {
+                Some(station) => station.update_from(temp),
+                None => {
+                    station_map.insert(name, StationData::new(temp));
+                }
+            };
+        });
     return station_map;
 }
 
-fn process_mmap<'scope, 'env>(mmap: &'env [u8], chunk_size: usize, s: &'scope Scope<'scope, 'env>) -> HashMap<&'env str, StationData> {
+fn process_mmap<'scope, 'env>(
+    mmap: Mmap<'env>,
+    s: &'scope Scope<'scope, 'env>,
+) -> HashMap<&'env str, StationData> {
     let mut handlers: Vec<ScopedJoinHandle<HashMap<&str, StationData>>> = Vec::new();
-    let mut last_chunk_offset: usize = 0;
 
-    for chunk_num in 0..NUM_CONSUMERS {
-        let new_line_data = get_nearest_newline(mmap, chunk_num, chunk_size, last_chunk_offset);
-        let current_chunk_slice = new_line_data.0;
-        last_chunk_offset = new_line_data.1;
-
-        let h = s.spawn(move || process_chunk(current_chunk_slice));
+    for chunk in MmapChunkIterator::new(mmap, NUM_CONSUMERS) {
+        let h = s.spawn(move || process_chunk(chunk));
         handlers.push(h);
     }
 
@@ -167,7 +150,6 @@ fn process_mmap<'scope, 'env>(mmap: &'env [u8], chunk_size: usize, s: &'scope Sc
         station_map = merge_hash(station_map, inner_station);
     }
     station_map
-
 }
 
 fn main() -> io::Result<()> {
@@ -175,15 +157,13 @@ fn main() -> io::Result<()> {
     let args: Vec<String> = env::args().collect();
     let file_name = match args.get(2).clone() {
         Some(fname) => fname,
-        None => "measurements.txt",
+        None => "sample.txt",
     };
     let f = File::open(file_name)?;
-    let f_size = f.metadata().unwrap().len();
-    let mmap = &mmap::Mmap::from_file(f);
-    let chunk_size = f_size as usize / NUM_CONSUMERS;
+    let mmap = mmap::Mmap::from_file(f);
 
     thread::scope(|s| {
-        let station_map = process_mmap(mmap, chunk_size, s);
+        let station_map = process_mmap(mmap, s);
 
         let mut stdout = io::stdout().lock();
         stdout.write(b"{").unwrap();
@@ -193,7 +173,7 @@ fn main() -> io::Result<()> {
             v
         };
         let (last, vec_content) = sorted_key_value_vec.split_last().unwrap();
-        for (k, v) in vec_content{
+        for (k, v) in vec_content {
             write!(stdout, "{}={}, ", k, v).unwrap();
         }
         write!(stdout, "{}={}}}", last.0, last.1).unwrap();

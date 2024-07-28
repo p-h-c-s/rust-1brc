@@ -31,3 +31,7 @@ With root:
 ## Iterating
 
 In order to quickly test different implementations i used a sample file containing a tenth of the original lines. This file can be created from the original with the `get_sample.sh` script
+
+## Notes
+
+I wanted to avoid using any external crates. The only exception was `libc` which provides cross-platform C bindings so we could call `mmap`.
