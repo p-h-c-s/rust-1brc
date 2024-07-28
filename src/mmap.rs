@@ -1,8 +1,8 @@
+use std::mem;
 use std::ops::Deref;
 use std::os::fd::AsRawFd;
 use std::ptr::null_mut;
 use std::{fs::File, os::raw::c_void};
-use std::mem;
 
 use libc::{mmap, munmap, size_t, MAP_FAILED, MAP_SHARED, PROT_READ};
 
@@ -63,7 +63,7 @@ pub struct MmapChunkIterator<'a> {
     chunk_size: usize,
 }
 
-impl <'a> MmapChunkIterator<'a> {
+impl<'a> MmapChunkIterator<'a> {
     fn with_consumers(mut self, consumers: usize) -> Self {
         self.chunk_size = self.data.len() / consumers;
         self
@@ -73,11 +73,12 @@ impl <'a> MmapChunkIterator<'a> {
         Self {
             data,
             chunk_size: 1,
-        }.with_consumers(num_consumers)
+        }
+        .with_consumers(num_consumers)
     }
 }
 
-impl <'a> IntoIterator for Mmap<'a> {
+impl<'a> IntoIterator for Mmap<'a> {
     type IntoIter = MmapChunkIterator<'a>;
     type Item = &'a [u8];
 
@@ -101,7 +102,11 @@ impl<'a> Iterator for MmapChunkIterator<'a> {
         let chunk = &self.data[..chunk_end];
 
         // Find the last newline in the chunk
-        let split_at = chunk.iter().rposition(|&x| x == b'\n').map(|i| i + 1).unwrap_or(chunk_end);
+        let split_at = chunk
+            .iter()
+            .rposition(|&x| x == b'\n')
+            .map(|i| i + 1)
+            .unwrap_or(chunk_end);
 
         let (result, rest) = self.data.mmap_slice.split_at(split_at);
         self.data.mmap_slice = rest;
