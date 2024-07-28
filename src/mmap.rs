@@ -3,7 +3,7 @@ use std::os::fd::AsRawFd;
 use std::ptr::null_mut;
 use std::{fs::File, os::raw::c_void};
 
-use libc::{mmap, munmap, size_t, MAP_FAILED, MAP_SHARED, PROT_READ, madvise, MADV_WILLNEED};
+use libc::{madvise, mmap, munmap, size_t, MADV_WILLNEED, MAP_FAILED, MAP_SHARED, PROT_READ};
 
 /// Smart pointer type for a mmap. Handles munmap call.
 pub struct Mmap<'a> {

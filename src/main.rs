@@ -60,7 +60,7 @@ impl StationData {
         self.temp_sum += temp;
     }
     #[inline]
-    fn update_from_station(&mut self, src: Self) {
+    fn update_from_station(&mut self, src: &mut Self) {
         self.max_temp = self.max_temp.max(src.max_temp);
         self.min_temp = self.min_temp.min(src.min_temp);
         self.temp_sum += src.temp_sum;
@@ -96,21 +96,15 @@ impl StationData {
     }
 }
 
-/// Merges src into dest, consuming both and returning dest.
-/// Initally the entry api was used, but the current method with get_mut is slightly faster
-fn merge_hash<'a>(
+fn merge_hashmaps<'a>(
     mut dest: HashMap<&'a str, StationData>,
     src: HashMap<&'a str, StationData>,
 ) -> HashMap<&'a str, StationData> {
-    src.into_iter()
-        .for_each(|(src_key, src_val)| match dest.get_mut(&src_key) {
-            Some(dest_v) => {
-                dest_v.update_from_station(src_val);
-            }
-            None => {
-                dest.insert(src_key, src_val);
-            }
-        });
+    for (k, mut v) in src {
+        dest.entry(k)
+            .and_modify(|e| e.update_from_station(&mut v))
+            .or_insert(v);
+    }
     dest
 }
 
@@ -123,12 +117,10 @@ fn process_chunk<'a>(current_chunk_slice: &'a [u8]) -> HashMap<&'a str, StationD
         .lines()
         .map(|l| StationData::parse_data(l))
         .for_each(|(name, temp)| {
-            match station_map.get_mut(name) {
-                Some(station) => station.update_from(temp),
-                None => {
-                    station_map.insert(name, StationData::new(temp));
-                }
-            };
+            station_map
+                .entry(name)
+                .and_modify(|e| e.update_from(temp))
+                .or_insert(StationData::new(temp));
         });
     return station_map;
 }
@@ -147,7 +139,7 @@ fn process_mmap<'scope, 'env>(
     let mut station_map: HashMap<&str, StationData> = HashMap::with_capacity(MAX_STATIONS);
     for h in handlers {
         let inner_station = h.join().unwrap();
-        station_map = merge_hash(station_map, inner_station);
+        station_map = merge_hashmaps(station_map, inner_station);
     }
     station_map
 }
