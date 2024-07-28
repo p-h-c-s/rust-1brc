@@ -35,3 +35,8 @@ In order to quickly test different implementations i used a sample file containi
 ## Notes
 
 I wanted to avoid using any external crates. The only exception was `libc` which provides cross-platform C bindings so we could call `mmap`.
+
+### Faster hashing
+
+The standard-library's HashMap doesn't implement the fastest hash algorithm for our use case. We can use crates like hashbrown to leverage faster (but DoS vulnerable) hashing algorithms.
+The branch `phcs/hashbrown-version` uses that crate and gets a speed-up of 2 seconds in my machine. It reaches read-speeds of 900Mb/s.
