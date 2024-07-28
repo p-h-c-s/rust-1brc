@@ -55,7 +55,6 @@ impl<'a> Mmap<'a> {
         }
     }
 
-    // pub fn line_chunk_iterator(num_chunks) -> Itera
 }
 
 pub struct MmapChunkIterator<'a> {
@@ -145,21 +144,4 @@ mod tests {
         assert_eq!(&*mmap, test_content);
         remove_test_file(test_file_path);
     }
-
-    // #[test]
-    // fn test_iterator() {
-    //     let test_file_path = Path::new("test_file.txt");
-    //     let test_content = b"Hello, mmap!";
-    //     create_test_file(test_file_path, test_content);
-    //     let file = File::open(test_file_path).unwrap();
-
-    //     let mmap = Mmap::from_file(file);
-
-    //     for chunk in mmap {
-
-    //     }
-
-    //     assert_eq!(&*mmap, test_content);
-    //     remove_test_file(test_file_path);
-    // }
 }
