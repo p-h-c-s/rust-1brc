@@ -1,10 +1,9 @@
-use std::collections::HashMap;
+use hashbrown::HashMap;
 use std::env;
 use std::fmt;
 use std::fs::File;
 use std::io;
 use std::io::prelude::*;
-use std::str::from_utf8_unchecked;
 use std::thread::{self, Scope, ScopedJoinHandle};
 
 use mmap::Mmap;
