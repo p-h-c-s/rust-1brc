@@ -118,8 +118,7 @@ fn merge_hashmaps<'a>(
     dest
 }
 
-/// Parses a chunk of the input as StationData values. Assumes the input data contains
-/// valid utf-8 strings. Also assumes the input data contains whole lines as defined by the challenge
+/// Parses a chunk of the input as StationData values.
 fn process_chunk<'a>(current_chunk_slice: &'a [u8]) -> HashMap<&'a [u8], StationData> {
     let mut station_map: HashMap<&[u8], StationData> = HashMap::with_capacity(MAX_STATIONS);
     let mut start = 0;
@@ -132,6 +131,7 @@ fn process_chunk<'a>(current_chunk_slice: &'a [u8]) -> HashMap<&'a [u8], Station
             .or_insert(StationData::new(temp));
         start += end + 1; // move to the start of the next line
     }
+    // If we don't find a \n, process the remaining data
     if start < current_chunk_slice.len() {
         let line = &current_chunk_slice[start..];
         let (name, temp) = StationData::parse_data(line);
