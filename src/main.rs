@@ -14,7 +14,7 @@ pub mod mmap;
 
 // Defined in challenge spec
 const MAX_STATIONS: usize = 10000;
-const NUM_CONSUMERS: usize = 31;
+const NUM_CONSUMERS: usize = 32;
 const FIXED_POINT_DIVISOR: f64 = 10.0;
 
 struct StationData {
@@ -48,18 +48,26 @@ impl StationData {
         }
     }
 
+    fn to_bytes(&self) -> Vec<u8> {
+        format!(
+            "{:.1}/{:.1}/{:.1}",
+            (self.min_temp as f64 / FIXED_POINT_DIVISOR),
+            self.get_mean(),
+            (self.max_temp as f64 / FIXED_POINT_DIVISOR)
+        )
+        .into_bytes()
+    }
+
     fn get_mean(&self) -> f64 {
         (self.temp_sum as f64 / self.count as f64) / FIXED_POINT_DIVISOR
     }
 
-    #[inline]
     fn update_from(&mut self, temp: i32) {
         self.max_temp = self.max_temp.max(temp);
         self.min_temp = self.min_temp.min(temp);
         self.count += 1;
         self.temp_sum += temp;
     }
-    #[inline]
     fn update_from_station(&mut self, src: &mut Self) {
         self.max_temp = self.max_temp.max(src.max_temp);
         self.min_temp = self.min_temp.min(src.min_temp);
@@ -68,16 +76,16 @@ impl StationData {
     }
 
     #[inline]
-    fn parse_temp<'a>(temp: &'a str) -> i32 {
+    fn parse_temp(bytes: &[u8]) -> i32 {
         let mut result: i32 = 0;
         let mut negative: bool = false;
-        for ch in temp.chars() {
-            match ch {
-                '0'..='9' => {
-                    result = result * 10 + (ch as i32 - '0' as i32);
+        for &b in bytes {
+            match b {
+                b'0'..=b'9' => {
+                    result = result * 10 + (b as i32 - b'0' as i32);
                 }
-                '.' => {}
-                '-' => {
+                b'.' => {}
+                b'-' => {
                     negative = true;
                 }
                 _ => panic!("wrong format for temperature"),
@@ -90,16 +98,18 @@ impl StationData {
     }
 
     #[inline]
-    fn parse_data<'a>(raw: &'a str) -> (&'a str, i32) {
-        let (name, temp) = raw.split_once(";").unwrap();
+    fn parse_data(line: &[u8]) -> (&[u8], i32) {
+        let semicolon_pos = line.iter().position(|&b| b == b';').unwrap();
+        let name = &line[..semicolon_pos];
+        let temp = &line[semicolon_pos + 1..];
         (name, Self::parse_temp(temp))
     }
 }
 
 fn merge_hashmaps<'a>(
-    mut dest: HashMap<&'a str, StationData>,
-    src: HashMap<&'a str, StationData>,
-) -> HashMap<&'a str, StationData> {
+    mut dest: HashMap<&'a [u8], StationData>,
+    src: HashMap<&'a [u8], StationData>,
+) -> HashMap<&'a [u8], StationData> {
     for (k, mut v) in src {
         dest.entry(k)
             .and_modify(|e| e.update_from_station(&mut v))
@@ -110,38 +120,69 @@ fn merge_hashmaps<'a>(
 
 /// Parses a chunk of the input as StationData values. Assumes the input data contains
 /// valid utf-8 strings. Also assumes the input data contains whole lines as defined by the challenge
-fn process_chunk<'a>(current_chunk_slice: &'a [u8]) -> HashMap<&'a str, StationData> {
-    let mut station_map: HashMap<&str, StationData> = HashMap::with_capacity(MAX_STATIONS);
-    let str_slice = unsafe { from_utf8_unchecked(current_chunk_slice) };
-    str_slice
-        .lines()
-        .map(|l| StationData::parse_data(l))
-        .for_each(|(name, temp)| {
-            station_map
-                .entry(name)
-                .and_modify(|e| e.update_from(temp))
-                .or_insert(StationData::new(temp));
-        });
-    return station_map;
+fn process_chunk<'a>(current_chunk_slice: &'a [u8]) -> HashMap<&'a [u8], StationData> {
+    let mut station_map: HashMap<&[u8], StationData> = HashMap::with_capacity(MAX_STATIONS);
+    let mut start = 0;
+    while let Some(end) = current_chunk_slice[start..].iter().position(|&b| b == b'\n') {
+        let line = &current_chunk_slice[start..start + end];
+        let (name, temp) = StationData::parse_data(line);
+        station_map
+            .entry(name)
+            .and_modify(|e| e.update_from(temp))
+            .or_insert(StationData::new(temp));
+        start += end + 1; // move to the start of the next line
+    }
+    if start < current_chunk_slice.len() {
+        let line = &current_chunk_slice[start..];
+        let (name, temp) = StationData::parse_data(line);
+        station_map
+            .entry(name)
+            .and_modify(|e| e.update_from(temp))
+            .or_insert(StationData::new(temp));
+    }
+    station_map
 }
 
 fn process_mmap<'scope, 'env>(
     mmap: Mmap<'env>,
     s: &'scope Scope<'scope, 'env>,
-) -> HashMap<&'env str, StationData> {
-    let mut handlers: Vec<ScopedJoinHandle<HashMap<&str, StationData>>> = Vec::new();
+) -> HashMap<&'env [u8], StationData> {
+    let mut handlers: Vec<ScopedJoinHandle<HashMap<&[u8], StationData>>> = Vec::new();
 
     for chunk in MmapChunkIterator::new(mmap, NUM_CONSUMERS) {
         let h = s.spawn(move || process_chunk(chunk));
         handlers.push(h);
     }
 
-    let mut station_map: HashMap<&str, StationData> = HashMap::with_capacity(MAX_STATIONS);
+    let mut station_map: HashMap<&[u8], StationData> = HashMap::with_capacity(MAX_STATIONS);
     for h in handlers {
         let inner_station = h.join().unwrap();
         station_map = merge_hashmaps(station_map, inner_station);
     }
     station_map
+}
+
+fn write_output_to_stdout(station_map: HashMap<&[u8], StationData>) -> io::Result<()> {
+    let mut stdout = io::stdout().lock();
+    let mut buffer = Vec::new();
+
+    buffer.extend_from_slice(b"{");
+
+    let mut sorted_key_value_vec: Vec<_> = station_map.iter().collect();
+    sorted_key_value_vec.sort_by_key(|e| e.0);
+
+    for (i, (name, data)) in sorted_key_value_vec.iter().enumerate() {
+        if i > 0 {
+            buffer.extend_from_slice(b", ");
+        }
+        buffer.extend_from_slice(name);
+        buffer.extend_from_slice(b"=");
+        buffer.extend(data.to_bytes());
+    }
+
+    buffer.extend_from_slice(b"}");
+
+    stdout.write_all(&buffer)
 }
 
 fn main() -> io::Result<()> {
@@ -156,19 +197,7 @@ fn main() -> io::Result<()> {
 
     thread::scope(|s| {
         let station_map = process_mmap(mmap, s);
-
-        let mut stdout = io::stdout().lock();
-        stdout.write(b"{").unwrap();
-        let sorted_key_value_vec = {
-            let mut v = Vec::from_iter(station_map);
-            v.sort_by_key(|e| e.0);
-            v
-        };
-        let (last, vec_content) = sorted_key_value_vec.split_last().unwrap();
-        for (k, v) in vec_content {
-            write!(stdout, "{}={}, ", k, v).unwrap();
-        }
-        write!(stdout, "{}={}}}", last.0, last.1).unwrap();
+        write_output_to_stdout(station_map).unwrap();
     });
 
     Ok(())
