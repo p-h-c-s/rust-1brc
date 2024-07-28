@@ -3,8 +3,10 @@
 This repository contains a solution to the [1 billion row challenge](https://github.com/gunnarmorling/1brc), written in rust.
 
 The solution uses the concept of divide-and-conquer, by dividing the input file into chunks and processing them in parallel.
-The IO is done by creating a `mmap` from the challenge file. This allows the solution to achieve read speeds of up to 800Mb/s in my Mac air M1 16GB 1TB of SSD storage.
-This implementation also uses little memory. We completely avoid 'user' heap-allocations (however the standard-library might heap-allocate internally). As the number of unique station names is bounded by 10000, the data structures used to aggregate the data are very lightweight. In my tests the program stabilizes at about 8.5Mb.
+The IO is done by creating a `mmap` from the challenge file. This allows the solution to achieve read speeds of up to 900Mb/s in my Mac air M1 16GB 1TB of SSD storage.
+This implementation also uses little memory. I completely avoid 'user' heap-allocations (however the standard-library might heap-allocate internally). As the number of unique station names is bounded by 10000, the data structures used to aggregate the data are very lightweight. In my tests the program stabilizes at about 8.5Mb.
+We also parse the input as bytes to avoid string overhead.
+
 
 ## Running
 
