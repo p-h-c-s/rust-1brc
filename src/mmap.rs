@@ -3,7 +3,7 @@ use std::os::fd::AsRawFd;
 use std::ptr::null_mut;
 use std::{fs::File, os::raw::c_void};
 
-use libc::{mmap, munmap, size_t, MAP_FAILED, MAP_SHARED, PROT_READ};
+use libc::{mmap, munmap, size_t, MAP_FAILED, MAP_SHARED, PROT_READ, madvise, MADV_WILLNEED};
 
 /// Smart pointer type for a mmap. Handles munmap call.
 pub struct Mmap<'a> {
@@ -48,8 +48,8 @@ impl<'a> Mmap<'a> {
                 panic!("mmap failed");
             }
             // We can advise the kernel on how we intend to use the mmap.
-            // But this did not improve my read performance
-            // madvise(m, size, MADV_WILLNEED);
+            // But this did not improve my read performance in a meaningful way
+            madvise(m, size, MADV_WILLNEED);
             return Self::new(std::slice::from_raw_parts(m as *const u8, size));
         }
     }
