@@ -1,4 +1,3 @@
-use std::mem;
 use std::ops::Deref;
 use std::os::fd::AsRawFd;
 use std::ptr::null_mut;
@@ -54,7 +53,6 @@ impl<'a> Mmap<'a> {
             return Self::new(std::slice::from_raw_parts(m as *const u8, size));
         }
     }
-
 }
 
 pub struct MmapChunkIterator<'a> {
