@@ -4,7 +4,6 @@ use std::fmt;
 use std::fs::File;
 use std::io;
 use std::io::prelude::*;
-use std::str::from_utf8_unchecked;
 use std::thread::{self, Scope, ScopedJoinHandle};
 
 use mmap::Mmap;
@@ -190,7 +189,7 @@ fn main() -> io::Result<()> {
     let args: Vec<String> = env::args().collect();
     let file_name = match args.get(2).clone() {
         Some(fname) => fname,
-        None => "sample.txt",
+        None => "measurements.txt",
     };
     let f = File::open(file_name)?;
     let mmap = mmap::Mmap::from_file(f);
